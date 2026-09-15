@@ -2,7 +2,7 @@
 out/
 !**/src/main/**/out/
 !**/src/test/**/out/
-.kotlin
+.kotlin/
 
 ### Eclipse ###
 .apt_generated
@@ -44,3 +44,6 @@ target/
 
 ### Java
 *.class
+
+### Local verification artifacts
+.pptx-validation/

@@ -2,65 +2,71 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/** Прикладные операции отделены от JavaFX и деталей JDBC. */
 public final class RestaurantController {
+    public static final int PAGE_SIZE = 10;
+
     private final RestaurantDAO dao;
 
-    public RestaurantController(RestaurantDAO dao) { this.dao = dao; }
+    public RestaurantController(RestaurantDAO dao) {
+        this.dao = dao;
+    }
 
-    public void addDish(Dish dish) { dao.addDish(dish); }
+    public void addDish(String name, String category, BigDecimal price) {
+        Dish dish = new Dish(dao.nextDishId(), name, category, price, new NutritionInfo(250, 200));
+        dao.addDish(dish);
+    }
 
-    public List<Dish> getAllDishes() { return dao.getAllDishes(); }
-    public List<Order> getAllOrders() { return dao.getAllOrders(); }
+    public void addDefaultDishesWhenMenuIsEmpty() {
+        if (dao.countDishes("", "Все") != 0) return;
+        dao.addDish(new Dish(1, "Том ям", "Супы", new BigDecimal("420.00"), new NutritionInfo(350, 310)));
+        dao.addDish(new Dish(2, "Чай", "Напитки", new BigDecimal("120.00"), new NutritionInfo(300, 5)));
+        dao.addDish(new Dish(3, "Чизкейк", "Десерты", new BigDecimal("260.00"), new NutritionInfo(150, 420)));
+    }
 
-    public Order createOrder(long id, Customer customer, List<Dish> dishes) {
-        Order order = new Order(id, customer, dishes, OrderStatus.NEW, LocalDateTime.now());
+    public DishPage findDishes(String query, String category, int page) {
+        int safePage = Math.max(0, page);
+        int offset = safePage * PAGE_SIZE;
+        List<Dish> dishes = dao.findDishes(query, category, PAGE_SIZE, offset);
+        long total = dao.countDishes(query, category);
+        return new DishPage(dishes, safePage, total, PAGE_SIZE);
+    }
+
+    public List<String> getCategories() {
+        return dao.getCategories();
+    }
+
+    public Order createOrder(Customer customer, List<Dish> dishes) {
+        Order order = new Order(dao.nextOrderId(), customer, dishes, OrderStatus.NEW, LocalDateTime.now());
         dao.addOrder(order);
         return order;
     }
 
+    public OrderPage getOrders(int page) {
+        int safePage = Math.max(0, page);
+        int offset = safePage * PAGE_SIZE;
+        return new OrderPage(dao.getOrdersPage(PAGE_SIZE, offset), safePage, dao.countOrders(), PAGE_SIZE);
+    }
+
     public Order changeOrderStatus(long orderId, OrderStatus status) {
-        Order order = dao.getAllOrders().stream()
-                .filter(item -> item.id() == orderId)
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("Заказ не найден"));
-        Order updatedOrder = order.withStatus(status);
-        dao.replaceOrder(updatedOrder);
-        return updatedOrder;
-    }
-
-    public Order addDishesToOrder(long orderId, List<Dish> newDishes) {
-        Order order = dao.getAllOrders().stream().filter(item -> item.id() == orderId).findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("Заказ не найден"));
-        List<Dish> additions = List.copyOf(newDishes);
-        dao.appendDishesToOrder(orderId, additions);
-        List<Dish> allDishes = new java.util.ArrayList<>(order.dishes());
-        allDishes.addAll(additions);
-        return new Order(order.id(), order.customer(), allDishes, order.status(), order.createdAt());
-    }
-
-    public Order removeDishFromOrder(long orderId, long dishId) {
-        Order order = dao.getAllOrders().stream().filter(item -> item.id() == orderId).findFirst().orElseThrow(() -> new IllegalArgumentException("Заказ не найден"));
-        dao.removeDishFromOrder(orderId, dishId);
-        List<Dish> dishes = new java.util.ArrayList<>(order.dishes());
-        for (int index = 0; index < dishes.size(); index++) {
-            if (dishes.get(index).id() == dishId) { dishes.remove(index); break; }
-        }
-        if (dishes.isEmpty()) { dao.deleteOrder(orderId); throw new IllegalStateException("Заказ пуст: он удален"); }
-        return new Order(order.id(), order.customer(), dishes, order.status(), order.createdAt());
-    }
-
-    public void deleteOrder(long orderId) { dao.deleteOrder(orderId); }
-
-    public List<Dish> filterByCategory(String category) {
-        return dao.getAllDishes().stream().filter(d -> d.category().equalsIgnoreCase(category)).toList();
-    }
-
-    public List<Dish> searchDish(String query) {
-        String normalizedQuery = query == null ? "" : query.toLowerCase();
-        return dao.getAllDishes().stream().filter(d -> d.name().toLowerCase().contains(normalizedQuery)).toList();
+        if (status == null) throw new IllegalArgumentException("Выберите статус");
+        dao.updateOrderStatus(orderId, status);
+        return dao.findOrderById(orderId);
     }
 
     public BigDecimal getDailyRevenue() {
-        return dao.getAllOrders().stream().map(Order::total).reduce(BigDecimal.ZERO, BigDecimal::add);
+        return dao.getRevenue();
+    }
+
+    public record DishPage(List<Dish> items, int page, long totalItems, int pageSize) {
+        public int totalPages() { return Math.max(1, (int) Math.ceil((double) totalItems / pageSize)); }
+        public boolean hasPrevious() { return page > 0; }
+        public boolean hasNext() { return page + 1 < totalPages(); }
+    }
+
+    public record OrderPage(List<Order> items, int page, long totalItems, int pageSize) {
+        public int totalPages() { return Math.max(1, (int) Math.ceil((double) totalItems / pageSize)); }
+        public boolean hasPrevious() { return page > 0; }
+        public boolean hasNext() { return page + 1 < totalPages(); }
     }
 }
